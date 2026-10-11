@@ -1,0 +1,19 @@
+# Môi trường Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Dữ liệu và mô hình tải về
+data/
+models/
+outputs/
+
+# Checkpoint huấn luyện
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+
+# File hệ thống macOS
+.DS_Store
