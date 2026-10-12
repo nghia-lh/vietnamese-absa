@@ -34,3 +34,77 @@ def test_exact_score():
 def test_overlap_detection():
     d={'train':[{'text':'Repeat','spans':[]}],'dev':[{'text':'repeat','spans':[]}],'test':[]}
     assert audit(d)['cross_split_duplicate_text_count']==1
+    
+from src.segmentation import Segmenter
+
+
+def test_underscore_alignment():
+    # Giả lập kết quả tách từ để không cần khởi động Java
+    class FakeEngine:
+        def word_segment(self, text):
+            return ["Pin còn 18 _ 19%"]
+
+    seg = Segmenter.__new__(Segmenter)
+    seg.engine = FakeEngine()
+
+    text = "Pin còn 18_19%"
+    words = seg.aligned_words(text)
+
+    assert words == [
+        ("Pin", 0, 3),
+        ("còn", 4, 7),
+        ("18", 8, 10),
+        ("_", 10, 11),
+        ("19%", 11, 14),
+    ]
+
+def test_vietnamese_tone_alignment():
+    # Giả lập từ đã được VnCoreNLP tách
+    class FakeEngine:
+        def word_segment(self, text):
+            return ["sức_khoẻ tốt"]
+
+    seg = Segmenter.__new__(Segmenter)
+    seg.engine = FakeEngine()
+
+    text = "sức khỏe tốt"
+    words = seg.aligned_words(text)
+
+    assert words == [
+        ("sức_khoẻ", 0, 8),
+        ("tốt", 9, 12),
+    ]
+    
+def test_emoji_alignment():
+    # Giả lập kết quả VnCoreNLP trả về
+    class FakeEngine:
+        def word_segment(self, text):
+            return ["Máy tốt \uf601"]
+
+    seg = Segmenter.__new__(Segmenter)
+    seg.engine = FakeEngine()
+
+    text = "Máy tốt 😁"
+    words = seg.aligned_words(text)
+
+    assert words == [
+        ("Máy", 0, 3),
+        ("tốt", 4, 7),
+        ("\uf601", 8, 9),
+    ]
+    
+def test_emoji_inside_word_alignment():
+    # Giả lập kết quả VnCoreNLP với emoji nằm giữa chữ
+    class FakeEngine:
+        def word_segment(self, text):
+            return ["nữa\uf612máy"]
+
+    seg = Segmenter.__new__(Segmenter)
+    seg.engine = FakeEngine()
+
+    text = "nữa😒máy"
+    words = seg.aligned_words(text)
+
+    assert words == [
+        ("nữa\uf612máy", 0, 7),
+    ]

@@ -19,6 +19,12 @@ def test_star_join_ambiguity():
     assert stats['train_unmatched_or_conflicting']==1
 
 def test_bio():
-    words=[('pin',0,3),('yếu',4,7),('nhưng',8,13)]
-    spans=[{'start':0,'end':7,'category':'BATTERY','polarity':'negative'}]
-    assert word_labels(words,spans)==['B-BATTERY#NEGATIVE','I-BATTERY#NEGATIVE','O']
+    text = "pin yếu nhưng"
+    words = [('pin', 0, 3), ('yếu', 4, 7), ('nhưng', 8, 13)]
+    spans = [{'start': 0, 'end': 7, 'category': 'BATTERY', 'polarity': 'negative'}]
+
+    assert word_labels(words, spans, text) == [
+        'B-BATTERY#NEGATIVE',
+        'I-BATTERY#NEGATIVE',
+        'O'
+    ]

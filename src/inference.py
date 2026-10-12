@@ -1,7 +1,9 @@
 """Local inference contract for dashboard developer: predict_review(text). No hosted LLM APIs."""
+from email.mime import text
 from pathlib import Path
 from .encoding import encode_words,word_predictions
 from .decode import decode_bio
+from .segmentation import split_token_boundaries
 
 class ABSAInference:
     def __init__(self,model_root='outputs/phobert',vncorenlp='models/vncorenlp',device=None,max_length=256):
@@ -19,7 +21,8 @@ class ABSAInference:
     def predict_review(self,text):
         import torch
         if not isinstance(text,str) or not text.strip():raise ValueError('Input must be nonempty text')
-        words=self.seg.aligned_words(text)
+        words = self.seg.aligned_words(text)
+        words = split_token_boundaries(words, text)
         if not words:return {'text':text,'overall_sentiment':None,'overall_confidence':None,'aspects':[]}
         joined=' '.join(w for w,_,_ in words)
         oe=self.otok(joined,return_tensors='pt',truncation=True,max_length=self.max_length)

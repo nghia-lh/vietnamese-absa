@@ -17,7 +17,7 @@ def main(args):
     import torch
     from transformers import (AutoTokenizer,AutoModelForSequenceClassification,AutoModelForTokenClassification,
                               Trainer,TrainingArguments,DataCollatorForTokenClassification,DataCollatorWithPadding)
-    from .segmentation import Segmenter
+    from .segmentation import Segmenter, split_token_boundaries
     random.seed(args.seed);np.random.seed(args.seed);torch.manual_seed(args.seed)
     raw=load_splits(args.data)
     leakage=audit(raw)
@@ -32,7 +32,14 @@ def main(args):
         seg=Segmenter(args.vncorenlp)
         datasets={}
         for k,rows in splits.items():
-            texts=[' '.join(w for w,_,_ in seg.aligned_words(r['text'])) for r in rows]
+            texts = [
+                ' '.join(
+                    w for w, _, _ in split_token_boundaries(
+            seg.aligned_words(r['text']), r['text']
+        )
+    )
+    for r in rows
+]
             enc=tokenizer(texts,truncation=True,max_length=args.max_length)
             datasets[k]=Records([{**{field:vals[i] for field,vals in enc.items()},'labels':LABELS.index(rows[i]['overall'])} for i in range(len(rows))])
         model=AutoModelForSequenceClassification.from_pretrained(args.model,num_labels=len(LABELS),id2label=dict(enumerate(LABELS)),label2id={v:i for i,v in enumerate(LABELS)})
