@@ -19,27 +19,42 @@ def main(args):
                               Trainer,TrainingArguments,DataCollatorForTokenClassification,DataCollatorWithPadding)
     from .segmentation import Segmenter, split_token_boundaries
     random.seed(args.seed);np.random.seed(args.seed);torch.manual_seed(args.seed)
-    raw=load_splits(args.data)
+    if args.task == 'overall' and args.overall_source == 'visfd':
+        raw = {
+            split: load_jsonl(Path(args.data) / f'{split}.jsonl')
+            for split in ('train', 'dev', 'test')
+        }
+    else:
+        raw = load_splits(args.data)
     leakage=audit(raw)
     if leakage['cross_split_duplicate_text_count'] and not args.allow_overlap:
         raise ValueError('Cross-split duplicates detected: inspect python -m src.audit; do not ignore without justification')
     output=Path(args.output)/args.task;output.mkdir(parents=True,exist_ok=True)
     tokenizer=AutoTokenizer.from_pretrained(args.model,use_fast=False)
     if args.task=='overall':
-        stars=load_stars_csv(args.stars_csv,args.text_col,args.star_col) if args.stars_csv else []
-        splits,provenance=build_overall(raw,stars,args.label_strategy)
+        if args.overall_source == 'visfd':
+            splits = raw
+            provenance = {
+                'source': 'UIT-ViSFD',
+                'method': 'rating_derived',
+                'mapping': {'1-2': 'negative', '3': 'neutral', '4-5': 'positive'}
+            }
+        else:
+            stars=load_stars_csv(args.stars_csv,args.text_col,args.star_col) if args.stars_csv else []
+            splits,provenance=build_overall(raw,stars,args.label_strategy)
         if min(map(len,splits.values()))==0:raise ValueError('Empty labeled split: check label strategy')
         seg=Segmenter(args.vncorenlp)
         datasets={}
-        for k,rows in splits.items():
-            texts = [
-                ' '.join(
-                    w for w, _, _ in split_token_boundaries(
-            seg.aligned_words(r['text']), r['text']
-        )
-    )
-    for r in rows
-]
+
+        def segment_overall(text):
+            try:
+                words = split_token_boundaries(seg.aligned_words(text), text)
+                return ' '.join(w for w, _, _ in words)
+            except ValueError:
+                return text
+
+        for k, rows in splits.items():
+            texts = [segment_overall(r['text']) for r in rows]
             enc=tokenizer(texts,truncation=True,max_length=args.max_length)
             datasets[k]=Records([{**{field:vals[i] for field,vals in enc.items()},'labels':LABELS.index(rows[i]['overall'])} for i in range(len(rows))])
         model=AutoModelForSequenceClassification.from_pretrained(args.model,num_labels=len(LABELS),id2label=dict(enumerate(LABELS)),label2id={v:i for i,v in enumerate(LABELS)})
@@ -83,7 +98,7 @@ def main(args):
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--task',choices=['overall','aspect'],required=True)
-    p.add_argument('--model',default='vinai/phobert-base-v2');p.add_argument('--data',default='data/visd4sa')
+    p.add_argument('--overall-source',choices=['majority','visfd'],default='majority');p.add_argument('--model',default='vinai/phobert-base-v2');p.add_argument('--data',default='data/visd4sa')
     p.add_argument('--processed',default='data/processed');p.add_argument('--vncorenlp',default='models/vncorenlp');p.add_argument('--stars-csv')
     p.add_argument('--text-col',default='comment');p.add_argument('--star-col',default='n_star');p.add_argument('--label-strategy',choices=['rating_then_majority','majority_only','rating_only'],default='rating_then_majority')
     p.add_argument('--output',default='outputs/phobert');p.add_argument('--max-length',type=int,default=256)

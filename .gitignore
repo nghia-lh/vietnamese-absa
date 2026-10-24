@@ -17,3 +17,38 @@ outputs/
 
 # File hệ thống macOS
 .DS_Store
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Data and outputs
+data/
+outputs/
+dashboard_data/
+
+# Model checkpoints
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Backups
+*.zip
+*.bak
+*.pkl
+*.joblib
+
+# Secrets
+.env
+.env.*
+!.env.example
+*credentials*
+*secret*
+
+# Other
+.DS_Store
+*.db
+*.sqlite*

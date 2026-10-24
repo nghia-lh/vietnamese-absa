@@ -1,64 +1,602 @@
-# ABSA tiếng Việt — ML backend tham khảo (Google Colab)
+# Phân tích cảm xúc và khía cạnh trong đánh giá sản phẩm tiếng Việt
 
-**Phạm vi:** preprocessing, baseline TF-IDF + Logistic Regression, PhoBERT overall sentiment, PhoBERT BIO category+polarity, evaluation và hàm `ABSAInference.predict_review()`. **Không có dashboard.** Source là bản nghiên cứu/tham khảo; môn học yêu cầu nhóm tự thực hiện sản phẩm nộp.
+Đây là đồ án môn Xử lý ngôn ngữ tự nhiên (NLP), thực hiện bài toán phân tích cảm xúc trong các bài đánh giá sản phẩm bằng tiếng Việt.
 
-## Quyết định phương pháp
+Nhóm xây dựng hai mô hình để giải quyết hai bài toán:
 
-- Dataset chính: UIT-ViSD4SA, giữ nguyên `train/dev/test` của nhà phát hành (dự kiến 7.784/1.113/2.225). Chú ý xác thực lại với file dataset thực tải.
-- Weak overall labels: rating 1–2 negative, 3 neutral, 4–5 positive, **chỉ nếu ghép chính xác duy nhất review** với UIT-ViSFD; nếu không có rating, dùng majority aspect polarity (bỏ hòa/không có aspect). Lưu provenance trong JSON metrics. Đây **không phải gold overall labels** và có thể đo agreement với weak labels thay vì cảm xúc thực.
-- Baseline: chọn C theo macro-F1 validation. PhoBERT fine-tune riêng classifier overall và BIO tagger.
-- Không sử dụng hosted LLM API để dự đoán. Hugging Face chỉ cung cấp checkpoint khởi tạo, Colab là máy chạy.
+- **Overall Sentiment Classification:** Dự đoán cảm xúc chung của một bài đánh giá, gồm 3 nhãn `positive`, `neutral` và `negative`.
+- **Aspect-Based Sentiment Analysis (ABSA):** Tìm các đoạn văn bản nói về từng khía cạnh của sản phẩm, xác định loại khía cạnh và cảm xúc tương ứng.
 
-## Chạy trên Google Colab
+Ngoài phần huấn luyện và đánh giá mô hình, nhóm còn xây dựng API bằng FastAPI để tích hợp với giao diện web. Các mô hình chạy trực tiếp trên máy chủ, không sử dụng API của các mô hình ngôn ngữ bên ngoài để phân tích review.
 
-Mở `Colab_Runbook.ipynb`, chọn GPU và thực thi lần lượt. Hoặc dùng các lệnh sau **từ thư mục gốc dự án**:
+## 1. Dữ liệu sử dụng
+
+Nhóm sử dụng hai bộ dữ liệu tiếng Việt:
+
+| Bài toán | Bộ dữ liệu | Train | Dev | Test |
+|---|---|---:|---:|---:|
+| Overall Sentiment | UIT-ViSFD | 7.057 | 1.004 | 2.022 |
+| Aspect-Based Sentiment | UIT-ViSD4SA | 7.360 | 1.037 | 2.076 |
+
+### 1.1. Overall Sentiment
+
+Đối với Overall Sentiment, nhóm sử dụng thông tin số sao đánh giá để tạo nhãn cảm xúc:
+
+- 1–2 sao: `negative`
+- 3 sao: `neutral`
+- 4–5 sao: `positive`
+
+Do nhãn được suy ra từ số sao nên không phải lúc nào cũng phản ánh hoàn toàn nội dung văn bản. Ví dụ, một người có thể đánh giá 5 sao nhưng vẫn phàn nàn về một vài tính năng của sản phẩm.
+
+Dữ liệu sau xử lý được lưu tại:
+
+```text
+data/overall_visfd/
+├── train.jsonl
+├── dev.jsonl
+├── test.jsonl
+└── preprocessing_report.json
+```
+
+### 1.2. Aspect-Based Sentiment
+
+Với bài toán ABSA, nhóm sử dụng UIT-ViSD4SA. Mỗi review có thể chứa nhiều khía cạnh, mỗi khía cạnh gồm:
+
+- `start`, `end`: vị trí đoạn văn bản.
+- `category`: loại khía cạnh như BATTERY, CAMERA, DESIGN, PERFORMANCE...
+- `polarity`: cảm xúc của khía cạnh (`positive`, `neutral`, `negative`).
+
+Ví dụ:
+
+```text
+Review: "Pin rất tốt nhưng camera hơi kém."
+
+Aspect 1:
+  Text: "Pin rất tốt"
+  Category: BATTERY
+  Polarity: positive
+
+Aspect 2:
+  Text: "camera hơi kém"
+  Category: CAMERA
+  Polarity: negative
+```
+
+Nhóm sử dụng cách gán nhãn BIO kết hợp category và polarity để huấn luyện mô hình nhận diện các đoạn khía cạnh.
+
+Dữ liệu sau xử lý nằm trong:
+
+```text
+data/processed_v2/
+├── train.jsonl
+├── dev.jsonl
+├── test.jsonl
+├── tags.json
+└── preprocessing_report.json
+```
+
+Lưu ý: Overall và Aspect được đánh giá trên hai tập dữ liệu khác nhau.
+
+## 2. Các mô hình sử dụng
+
+### 2.1. Baseline
+
+Nhóm xây dựng baseline cho Overall Sentiment bằng TF-IDF kết hợp với ba thuật toán:
+
+- Logistic Regression
+- Multinomial Naive Bayes
+- Linear SVM
+
+Các cấu hình được so sánh trên tập Dev bằng Macro-F1. Cấu hình tốt nhất trong thực nghiệm là Logistic Regression với `C=0.1`, TF-IDF unigram và bigram, có sử dụng `class_weight=balanced`.
+
+### 2.2. PhoBERT Overall
+
+Nhóm fine-tune `vinai/phobert-base-v2` cho bài toán phân loại cảm xúc chung.
+
+Đầu vào là nội dung review và đầu ra là một trong ba nhãn cảm xúc.
+
+### 2.3. PhoBERT Aspect
+
+Nhóm sử dụng một mô hình PhoBERT khác cho bài toán BIO sequence labeling.
+
+Mô hình dự đoán nhãn cho từng token, sau đó chuyển các nhãn BIO thành danh sách aspect spans gồm vị trí, category và polarity.
+
+Hai mô hình PhoBERT được huấn luyện riêng và kết hợp khi chạy inference.
+
+## 3. Cấu trúc thư mục
+
+Các thư mục chính của project:
+
+```text
+data/
+    overall_visfd/          # Dữ liệu Overall
+    processed_v2/           # Dữ liệu Aspect
+    visd4sa/                # Dữ liệu review gốc
+    visfd_raw/              # Dữ liệu rating gốc
+
+src/
+    download_data.py        # Tải dữ liệu
+    audit.py                # Kiểm tra dữ liệu
+    prepare.py              # Tiền xử lý Aspect
+    prepare_overall_visfd.py
+    segmentation.py         # Tách từ tiếng Việt
+    encoding.py
+    decode.py
+    train_baseline.py       # Train baseline
+    train_phobert.py        # Train PhoBERT
+    evaluate_overall.py
+    evaluate_model.py
+    evaluate_aspects.py
+    analyze_errors.py       # Phân tích lỗi
+    inference.py            # Chạy hai mô hình
+
+backend/
+    main.py                 # FastAPI
+    storage.py              # Lưu review
+
+models/
+    phobert/
+        overall/best/
+        aspect/best/
+    vncorenlp/
+
+outputs/
+    baseline_visfd/
+    evaluation/
+    analysis/
+    benchmark/
+```
+
+Một số thư mục dữ liệu và checkpoint có dung lượng lớn nên không nhất thiết nằm trong gói source code.
+
+## 4. Cài đặt môi trường
+
+Project được chạy trên Python 3.12. Phần xử lý dữ liệu và backend đã được thực hiện trên macOS.
+
+Tạo môi trường ảo:
 
 ```bash
-pip install -r requirements.txt
-python -m pytest -q
-python -m src.download_data --output data/visd4sa
-python -m src.audit --data data/visd4sa
-python -c "import py_vncorenlp; py_vncorenlp.download_model(save_dir='models/vncorenlp')"
-python -m src.prepare --data data/visd4sa --vncorenlp models/vncorenlp
-python -m src.train_baseline --label-strategy majority_only
-python -m src.train_phobert --task overall --label-strategy majority_only --fp16
-python -m src.train_phobert --task aspect --fp16
-python -m src.evaluate_model --checkpoint outputs/phobert/aspect/best --split test
+python3 -m venv .venv
+source .venv/bin/activate
 ```
 
-Để thử ghép rating, chuẩn bị file CSV `metadata/visfd.csv` gồm `comment,n_star` (cần xác minh đúng cột/nguồn và tỷ lệ match), rồi bỏ `--label-strategy majority_only` và thêm `--stars-csv metadata/visfd.csv` vào **cả baseline và overall PhoBERT**. Giữ cùng một chiến lược nhãn giữa hai mô hình mới có thể so sánh công bằng. Không âm thầm ép tỷ lệ match thấp thành rating-based training.
+Cài thư viện:
 
-Nếu bước audit báo cross-split duplicates, **dừng để kiểm tra**, không dùng `--allow-overlap` để bỏ qua mà không có lý do. Nếu prepare báo không khớp offsets, kiểm tra annotation/word segmentation và tỷ lệ dữ liệu bị loại. Không sử dụng test để chọn tham số.
-
-## Giao diện cho nhóm dashboard
-
-```python
-from src.inference import ABSAInference
-predictor = ABSAInference(model_root='outputs/phobert', vncorenlp='models/vncorenlp')
-result = predictor.predict_review('Máy chạy nhanh nhưng pin yếu')
+```bash
+python3 -m pip install -U pip
+python3 -m pip install -r requirements.txt
 ```
 
-Kết quả có `text`, `overall_sentiment`, `overall_confidence`, `aspects` (mỗi aspect có `start`, `end`, `text`, `category`, `polarity`, `confidence`) và `truncated`. `start/end` là Python half-open character offsets theo review gốc; có thể highlight bằng `text[start:end]`.
+Các thư viện chính gồm PyTorch, Transformers, Accelerate, scikit-learn, pandas, NumPy, VnCoreNLP, seqeval, matplotlib, FastAPI và Uvicorn.
 
-## Files quan trọng
+Nhóm đã kiểm tra cài đặt trên môi trường hiện tại bằng:
 
-- `src/data.py`, `src/overall.py`, `src/audit.py`: load gold, weak label provenance, duplicate checks.
-- `src/segmentation.py`, `src/prepare.py`, `src/encoding.py`: VnCoreNLP, alignment, BIO labels.
-- `src/train_baseline.py`, `src/train_phobert.py`: huấn luyện, lưu checkpoint/metrics.
-- `src/decode.py`, `src/evaluate_model.py`, `src/evaluate_aspects.py`: giải mã và exact-span / pair F1.
-- `src/inference.py`: inference contract.
-- `tests/`: kiểm tra logic đơn vị.
+```bash
+python3 -m pip check
+```
 
-## Giới hạn chưa được kiểm chứng
+Kết quả:
 
-- Chưa huấn luyện PhoBERT thực tế; **chưa có scores, confusion matrix thực nghiệm hoặc ablation/OOD results**.
-- Dữ liệu UIT-ViSD4SA và VnCoreNLP cần tải trên Colab rồi xác nhận schema annotation, offset conventions và coverage. `parse_span` hiện giả định **end inclusive** dựa trên định dạng mã gốc; nếu dữ liệu khác, phải xác minh và sửa trước train.
-- Dự đoán BIO dùng word/subword truncation theo `max_length=256`, kết quả có thể bỏ sót spans trong review dài. Kiểm tra tỉ lệ truncation.
-- Cần thêm log kết quả thí nghiệm, error analysis phân nhóm và ablation trước khi coi đạt toàn bộ rubric; giao diện do thành viên khác triển khai.
+```text
+No broken requirements found.
+```
 
-## Python 3.13 / lỗi cài dependency trên Colab
+Kiểm tra import các thư viện chính cũng thành công.
 
-- `py-vncorenlp` yêu cầu `pyjnius`. `pyjnius` v1.7.0 bổ sung hỗ trợ Python 3.13; `requirements.txt` ghim `>=1.7,<1.8` và wrapper `py-vncorenlp==0.1.4`.
-- Cài thư viện bằng `%pip install -U pip setuptools wheel`, sau đó `%pip install --prefer-binary -r requirements.txt` trong notebook.
-- Chạy `python -m pip check` và import `jnius, py_vncorenlp, transformers, sklearn, seqeval` trước khi chạy tests. **Không coi 9 passed là dấu hiệu pip đã cài thành công**.
-- Nếu vẫn lỗi `metadata-generation-failed`, gửi log đầy đủ (đặc biệt tên package ở phía trên dòng lỗi). Chưa có kiểm chứng cài dependencies end-to-end trên runtime Colab T4 Python 3.13.
+Nếu chưa có bộ tách từ VnCoreNLP, tải bằng lệnh:
+
+```bash
+python3 -c "import py_vncorenlp; py_vncorenlp.download_model(save_dir='models/vncorenlp')"
+```
+
+VnCoreNLP cần có Java để chạy. Ngoài ra, phiên bản thư viện giữa máy local và môi trường huấn luyện trên GPU có thể khác nhau, nên cần kiểm tra lại nếu cài trên máy mới.
+
+## 5. Chuẩn bị dữ liệu
+
+Nếu đã có các thư mục `data/overall_visfd` và `data/processed_v2` thì có thể dùng trực tiếp, không cần tiền xử lý lại.
+
+Nếu muốn tạo lại dữ liệu từ nguồn gốc, chạy:
+
+```bash
+python3 -m src.audit --data data/visd4sa
+
+python3 -m src.prepare \
+  --data data/visd4sa \
+  --vncorenlp models/vncorenlp \
+  --output data/processed_v2
+
+python3 -m src.prepare_overall_visfd
+```
+
+Script `prepare_overall_visfd.py` sử dụng dữ liệu rating từ `data/visfd_raw` và review tương ứng từ `data/visd4sa`.
+
+Sau khi tiền xử lý, nhóm đã kiểm tra số lượng mẫu, dữ liệu trùng trong từng split và giữa các split.
+
+Kết quả kiểm tra trên dữ liệu đã xử lý:
+
+| Nội dung | Overall | Aspect |
+|---|---:|---:|
+| Train | 7.057 | 7.360 |
+| Dev | 1.004 | 1.037 |
+| Test | 2.022 | 2.076 |
+| Review trùng trong từng split | 0 | 0 |
+| Review trùng giữa các split | 0 | 0 |
+
+Các file dự đoán trên Test cũng đã được kiểm tra khớp thứ tự với dữ liệu tương ứng. Với Aspect, không phát hiện trường hợp độ dài chuỗi BIO không hợp lệ trong lần kiểm tra này.
+
+## 6. Huấn luyện mô hình
+
+Nếu đã có checkpoint trong thư mục `models/` thì không cần train lại, có thể chuyển thẳng sang phần đánh giá hoặc chạy API.
+
+### 6.1. Train Baseline
+
+```bash
+python3 -m src.train_baseline \
+  --overall-source visfd \
+  --data data/overall_visfd \
+  --output outputs/baseline_visfd \
+  --seed 42
+```
+
+Nhóm chọn cấu hình dựa trên Macro-F1 của tập Dev, sau đó mới đánh giá trên Test.
+
+### 6.2. Train PhoBERT Overall
+
+```bash
+python3 -m src.train_phobert \
+  --task overall \
+  --overall-source visfd \
+  --data data/overall_visfd \
+  --vncorenlp models/vncorenlp \
+  --output models/phobert \
+  --model vinai/phobert-base-v2 \
+  --epochs 4 \
+  --batch-size 8 \
+  --grad-accum 2 \
+  --lr 2e-5 \
+  --max-length 256 \
+  --seed 42 \
+  --fp16
+```
+
+Checkpoint được lưu trong:
+
+```text
+models/phobert/overall/best/
+```
+
+### 6.3. Train PhoBERT Aspect
+
+```bash
+python3 -m src.train_phobert \
+  --task aspect \
+  --processed data/processed_v2 \
+  --output models/phobert \
+  --model vinai/phobert-base-v2 \
+  --epochs 4 \
+  --batch-size 8 \
+  --grad-accum 2 \
+  --lr 2e-5 \
+  --max-length 256 \
+  --seed 42 \
+  --fp16
+```
+
+Checkpoint được lưu trong:
+
+```text
+models/phobert/aspect/best/
+```
+
+Lưu ý: checkpoint Aspect hiện tại là kết quả của lần huấn luyện lại. Nhóm sử dụng metrics tương ứng với checkpoint này khi báo cáo, không trộn với kết quả từ lần train cũ.
+
+Tham số `--fp16` được sử dụng khi huấn luyện trên GPU CUDA. Khi chạy trên CPU hoặc máy không hỗ trợ CUDA cần điều chỉnh tham số này.
+
+## 7. Đánh giá mô hình
+
+### 7.1. Overall Sentiment
+
+Chạy đánh giá:
+
+```bash
+python3 -m src.evaluate_overall
+```
+
+Kết quả được lưu trong:
+
+```text
+outputs/evaluation/overall/
+    metrics.json
+    predictions.jsonl
+    confusion_matrix.png
+```
+
+Kết quả trên Test của UIT-ViSFD:
+
+| Mô hình | Accuracy | Macro-F1 |
+|---|---:|---:|
+| TF-IDF + Logistic Regression | 0.7408506429277942 | 0.6454101401965168 |
+| PhoBERT Overall | 0.7932739861523245 | 0.6569389079619072 |
+
+PhoBERT có kết quả tốt hơn baseline ở cả Accuracy và Macro-F1 trên tập Test này.
+
+### 7.2. Aspect-Based Sentiment
+
+Chạy đánh giá:
+
+```bash
+python3 -m src.evaluate_model \
+  --processed data/processed_v2 \
+  --checkpoint models/phobert/aspect/best \
+  --split test \
+  --output outputs/evaluation/aspect_kaggle/test_predictions.jsonl
+```
+
+Nhóm sử dụng hai cách đánh giá chính:
+
+- **Exact Span:** Span phải trùng chính xác vị trí bắt đầu và kết thúc.
+- **Aspect–Sentiment Pair:** Phải trùng vị trí, category và polarity.
+
+Kết quả trên Test của UIT-ViSD4SA:
+
+| Chỉ số | Precision | Recall | F1 |
+|---|---:|---:|---:|
+| Exact Span | 0.4866344195519348 | 0.5888786198398028 | 0.5328965709506552 |
+| Aspect–Sentiment Pair | 0.43228105906313646 | 0.5231053604436229 | 0.47337608028993583 |
+
+Ngoài ra, kết quả token classification của lần huấn luyện lại là:
+
+- Token Accuracy: `0.7108680702496826`
+- Token Macro-F1: `0.2237983556578706`
+
+Do bài toán cần trích xuất đúng cả đoạn văn bản và nhãn, nhóm sử dụng Exact Span F1 và Pair F1 làm các chỉ số chính cho phần đánh giá Aspect.
+
+### 7.3. Ablation của Baseline
+
+Nhóm thử bỏ một số thành phần của cấu hình Logistic Regression tốt nhất để xem ảnh hưởng đến kết quả:
+
+| Cấu hình | Test Macro-F1 |
+|---|---:|
+| Cấu hình ban đầu | 0.6454101401965168 |
+| Không dùng bigram | 0.6429267125935124 |
+| Không dùng class weighting | 0.45170397648350935 |
+
+Trong thực nghiệm này, việc bỏ class weighting làm Macro-F1 giảm nhiều hơn so với bỏ bigram.
+
+Kết quả được lưu tại:
+
+```text
+outputs/ablation_baseline/metrics.json
+```
+
+## 8. Phân tích lỗi
+
+Nhóm phân tích các review dự đoán sai để tìm hiểu những trường hợp mô hình còn gặp khó khăn.
+
+### 8.1. Overall Sentiment
+
+Từ 2.022 review trong tập Test, mô hình dự đoán sai 418 review.
+
+Nhóm phân tích thêm các trường hợp có phủ định, teencode, emoji và câu ngắn.
+
+| Nhóm review | Số mẫu | Accuracy | Macro-F1 |
+|---|---:|---:|---:|
+| Toàn bộ Test | 2.022 | 79,33% | 65,69% |
+| Có phủ định | 1.128 | 74,91% | 64,20% |
+| Có emoji | 77 | 84,42% | 58,51% |
+| Có teencode | 676 | 77,22% | 66,32% |
+| Câu rất ngắn | 4 | 100,00% | 33,33% |
+
+Các nhóm này được lọc bằng biểu thức chính quy và có thể trùng nhau. Ví dụ, một review vừa chứa phủ định vừa chứa teencode.
+
+Ở nhóm câu rất ngắn, chỉ có 4 mẫu nên kết quả chưa đủ để rút ra nhận xét chung.
+
+Một trường hợp Overall dự đoán sai là review có cả lời khen và chê về pin, màn hình, camera và giá bán. Nhãn từ rating là `positive` nhưng mô hình dự đoán `neutral`.
+
+Nhóm nhận thấy những review có nhiều ý kiến trái chiều có thể gây khó khăn cho việc xác định một nhãn cảm xúc chung. Bên cạnh đó, vì nhãn Overall được tạo từ rating nên cũng có trường hợp cảm xúc trong văn bản không hoàn toàn giống nhãn.
+
+### 8.2. Aspect-Based Sentiment
+
+Kết quả đánh giá theo một số nhóm review:
+
+| Nhóm review | Số mẫu | Exact Span F1 | Pair F1 |
+|---|---:|---:|---:|
+| Toàn bộ Test | 2.076 | 53,29% | 47,34% |
+| Có phủ định | 1.158 | 49,02% | 42,92% |
+| Có emoji | 65 | 48,05% | 43,75% |
+| Có teencode | 689 | 49,73% | 43,68% |
+| Có từ 2 khía cạnh trở lên | 1.690 | 55,30% | 49,13% |
+| Có nhiều polarity | 826 | 53,61% | 45,67% |
+
+Ngoài ra, nhóm sử dụng cách ghép các span có phần văn bản trùng nhau để phân loại lỗi gần đúng.
+
+| Loại | Số lần ghi nhận |
+|---|---:|
+| Dự đoán đúng hoàn toàn | 3.396 |
+| Sai ranh giới span | 2.216 |
+| Sai category | 655 |
+| Sai polarity | 454 |
+| Gold span không được ghép | 453 |
+| Predicted span không được ghép | 1.817 |
+
+Đây là kết quả phân nhóm tham khảo bằng phương pháp ghép span theo overlap. Một span có thể có nhiều lỗi cùng lúc nên các số lượng trên không phải những nhóm độc lập.
+
+Qua việc xem các ví dụ thực tế, nhóm nhận thấy có trường hợp mô hình xác định đúng category và polarity nhưng lấy thiếu hoặc thừa một vài ký tự ở ranh giới span. Những trường hợp này vẫn bị tính sai khi sử dụng exact-match.
+
+Nhóm cũng ghi nhận những khó khăn liên quan đến cách viết không chuẩn, từ viết tắt, emoji và các review có nhiều cảm xúc khác nhau.
+
+Kết quả phân tích được lưu tại:
+
+```text
+outputs/analysis/
+    error_analysis.json
+    aspect_error_groups.json
+    language_error_examples.json
+```
+
+Các trường hợp có khả năng mang ý nghĩa mỉa mai cần được xem xét thủ công, không thể kết luận chỉ dựa vào emoji hoặc từ khóa.
+
+## 9. Đánh giá trên dữ liệu bên ngoài
+
+Nhóm thử đánh giá PhoBERT Overall trên các review từ Tiki để xem kết quả khi sử dụng dữ liệu ngoài tập Test ban đầu.
+
+Dữ liệu ban đầu có 35.632 dòng. Sau các bước làm sạch, lọc dữ liệu trùng và xử lý những trường hợp không phù hợp với pipeline, còn 15.542 review đủ điều kiện theo quy trình đã sử dụng.
+
+Trong đó có 718 review bị loại ở bước lọc ký tự Unicode ngoài BMP do vấn đề gặp phải khi xử lý bằng bộ tách từ. Đây là cách xử lý tạm thời của thực nghiệm, không phải cách giải quyết chung cho mọi ký tự Unicode.
+
+Nhóm lấy 100 review với seed 42, gồm:
+
+- 30 review negative
+- 30 review neutral
+- 40 review positive
+
+Kết quả:
+
+| Chỉ số | Giá trị |
+|---|---:|
+| Accuracy | 0.69 |
+| Macro-F1 | 0.6373737373737374 |
+
+Confusion matrix theo thứ tự `negative`, `neutral`, `positive`:
+
+```text
+[[21, 5, 4],
+ [14, 9, 7],
+ [ 1, 0, 39]]
+```
+
+Nhãn của dữ liệu Tiki cũng được suy ra từ rating. Vì vậy kết quả này chỉ dùng để đánh giá thêm mô hình Overall trên nguồn review khác, chưa thể coi là đánh giá bằng nhãn cảm xúc được gán thủ công.
+
+File kết quả:
+
+```text
+outputs/evaluation/external_tiki/
+    metrics.json
+    predictions.jsonl
+    failed_reviews.jsonl
+```
+
+Đoạn script đánh giá Tiki trước đó được chạy riêng trong Terminal. Để người khác chạy lại hoàn toàn, nhóm vẫn cần bổ sung script này vào source code.
+
+## 10. API và ứng dụng
+
+Nhóm sử dụng FastAPI để kết nối mô hình với ứng dụng web.
+
+### 10.1. Chạy backend
+
+Trước tiên cần có checkpoint Overall, Aspect và bộ tách từ VnCoreNLP trong đúng thư mục.
+
+Chạy server:
+
+```bash
+python3 -m uvicorn backend.main:app \
+  --host 127.0.0.1 \
+  --port 8000
+```
+
+Sau khi chạy, mở Swagger UI tại:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### 10.2. Các API
+
+| Method | Endpoint | Chức năng |
+|---|---|---|
+| GET | `/api/v1/health` | Kiểm tra API |
+| POST | `/api/v1/analyze` | Phân tích một review |
+| POST | `/api/v1/reviews` | Phân tích và lưu review |
+| GET | `/api/v1/reviews` | Lấy danh sách review đã lưu |
+| GET | `/api/v1/statistics` | Thống kê review |
+
+Ví dụ gọi API phân tích:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Pin rất tốt nhưng camera hơi kém."}'
+```
+
+API trả về cảm xúc chung và danh sách khía cạnh, bao gồm:
+
+- `overall_sentiment`
+- `overall_confidence`
+- `aspects`
+- `truncated`
+
+Trong `aspects` có thông tin về đoạn văn bản, vị trí `start`, `end`, category, polarity và confidence.
+
+Các vị trí ký tự sử dụng quy ước `[start, end)` của Python. Khi hiển thị phần highlight trên React cần chú ý cách xử lý Unicode giữa Python và JavaScript.
+
+### 10.3. Benchmark inference
+
+Nhóm đã đo tốc độ suy luận trên MacBook Apple Silicon, sử dụng CPU.
+
+Thực nghiệm dùng 50 review từ UIT-ViSD4SA Test, seed 42, có 5 lượt warm-up.
+
+| Chỉ số | Inference trực tiếp | FastAPI |
+|---|---:|---:|
+| Mean | 95.893 ms | 95.330 ms |
+| Median | 90.957 ms | 90.510 ms |
+| P95 | 123.708 ms | 124.712 ms |
+| Throughput tuần tự | 10.428 review/s | 10.490 request/s |
+
+Thời gian load mô hình được ghi nhận là `8.951572624966502` giây trong phép đo inference.
+
+Các phép đo được thực hiện riêng nên không thể kết luận HTTP nhanh hơn chạy trực tiếp chỉ dựa vào sự chênh lệch nhỏ này.
+
+File kết quả:
+
+```text
+outputs/benchmark/
+    inference_latency.json
+    api_latency.json
+```
+
+Benchmark chưa bao gồm thời gian render frontend, độ trễ Internet hoặc tải từ nhiều người dùng đồng thời.
+
+### 10.4. Frontend
+
+Giao diện React do thành viên khác trong nhóm phụ trách.
+
+Backend đã có API phục vụ các chức năng phân tích review, lưu dữ liệu và thống kê. Phần tích hợp frontend và kiểm thử giao diện sẽ được cập nhật sau khi hoàn thành.
+
+Dữ liệu review của ứng dụng đang được lưu dưới dạng JSON trong `dashboard_data`, chưa sử dụng cơ sở dữ liệu riêng.
+
+## 11. Hạn chế và hướng phát triển
+
+Qua quá trình thực hiện, nhóm nhận thấy một số hạn chế:
+
+- **Nhãn Overall:** Được suy ra từ số sao nên có thể khác cảm xúc thể hiện trong nội dung review.
+- **Ranh giới Aspect:** Mô hình đôi khi lấy thiếu hoặc thừa ký tự, làm giảm kết quả Exact Span F1.
+- **Tiếng Việt không chuẩn:** Review có thể chứa teencode, lỗi chính tả, từ viết tắt và emoji, gây khó khăn cho tiền xử lý và dự đoán.
+- **Review nhiều cảm xúc:** Một bài đánh giá có thể khen và chê nhiều khía cạnh cùng lúc, trong khi Overall chỉ dự đoán một nhãn.
+- **Giới hạn dữ liệu:** Mô hình Aspect được học trên taxonomy của UIT-ViSD4SA nên chưa đánh giá đầy đủ khả năng áp dụng cho các loại sản phẩm ngoài phạm vi dữ liệu.
+- **Review dài:** Việc giới hạn đầu vào ở `max_length=256` có thể khiến một phần nội dung bị cắt.
+- **Bộ tách từ:** Một số ký tự đặc biệt từng gây lỗi trong quá trình xử lý dữ liệu Tiki.
+
+Nếu có thêm thời gian, nhóm có thể thử cải thiện việc chuẩn hóa từ viết tắt, bổ sung dữ liệu gán nhãn thủ công cho Overall, cải thiện xử lý ranh giới span và đánh giá trên nhiều nguồn review khác.
+
+Các hướng trên mới là đề xuất, nhóm chưa thực hiện thí nghiệm để kiểm chứng hiệu quả.
+
+## 12. Những phần cần hoàn thiện trước khi nộp
+
+- [x] Chuẩn bị dữ liệu và chia Train/Dev/Test.
+- [x] Huấn luyện và đánh giá baseline.
+- [x] Huấn luyện và đánh giá PhoBERT Overall.
+- [x] Huấn luyện và đánh giá PhoBERT Aspect.
+- [x] Phân tích lỗi và lưu kết quả.
+- [x] Kiểm tra dữ liệu trùng và thứ tự predictions.
+- [x] Cập nhật `requirements.txt` và kiểm tra dependencies trên máy hiện tại.
+- [x] Xây dựng và chạy thử backend FastAPI.
+- [ ] Kiểm tra toàn bộ test tự động của source.
+- [ ] Bổ sung các script chạy lại đánh giá Tiki, ablation và benchmark nếu chưa có trong repository.
+- [ ] Hoàn thiện và kiểm thử tích hợp giao diện React.
+- [ ] Hoàn thiện báo cáo và chuẩn bị demo.
+
+## 13. Ghi chú
+
+Các kết quả trong README được lấy từ những lần thực nghiệm đã thực hiện. Nhóm sử dụng kết quả của checkpoint hiện tại khi báo cáo, đặc biệt là mô hình PhoBERT Aspect đã huấn luyện lại.
+
+Project đã chạy trên môi trường phát triển hiện tại, nhưng chưa kiểm tra lại toàn bộ quy trình từ đầu trên một máy sạch. Nếu muốn tái lập hoàn toàn, cần chuẩn bị đúng dữ liệu nguồn, checkpoint, phiên bản thư viện và môi trường huấn luyện tương ứng.
