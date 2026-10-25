@@ -607,8 +607,6 @@ Benchmark chưa bao gồm thời gian render frontend, độ trễ Internet ho�
 
 ### 10.4. Frontend
 
-Giao diện React do thành viên khác trong nhóm phụ trách.
-
 Backend đã có API phục vụ các chức năng phân tích review, lưu dữ liệu và thống kê. Phần tích hợp frontend và kiểm thử giao diện sẽ được cập nhật sau khi hoàn thành.
 
 Dữ liệu review của ứng dụng đang được lưu dưới dạng JSON trong `dashboard_data`, chưa sử dụng cơ sở dữ liệu riêng.
@@ -629,20 +627,20 @@ Nếu có thêm thời gian, nhóm có thể thử cải thiện việc chuẩn 
 
 Các hướng trên mới là đề xuất, nhóm chưa thực hiện thí nghiệm để kiểm chứng hiệu quả.
 
-## 12. Những phần cần hoàn thiện trước khi nộp
+## 12. Ghi chú về khả năng tái lập
 
-- [x] Chuẩn bị dữ liệu và chia Train/Dev/Test.
-- [x] Huấn luyện và đánh giá baseline.
-- [x] Huấn luyện và đánh giá PhoBERT Overall.
-- [x] Huấn luyện và đánh giá PhoBERT Aspect.
-- [x] Phân tích lỗi và lưu kết quả.
-- [x] Kiểm tra dữ liệu trùng và thứ tự predictions.
-- [x] Cập nhật `requirements.txt` và kiểm tra dependencies trên máy hiện tại.
-- [x] Xây dựng và chạy thử backend FastAPI.
-- [ ] Kiểm tra toàn bộ test tự động của source.
-- [ ] Bổ sung các script chạy lại đánh giá Tiki, ablation và benchmark nếu chưa có trong repository.
-- [ ] Hoàn thiện và kiểm thử tích hợp giao diện React.
-- [ ] Hoàn thiện báo cáo và chuẩn bị demo.
+Repository cung cấp mã nguồn cho các bước tiền xử lý dữ liệu,
+huấn luyện mô hình, đánh giá và suy luận.
+
+Dataset gốc được cung cấp bởi các nhóm tác giả tương ứng.
+Trọng số PhoBERT đã fine-tune không được lưu trực tiếp
+trong repository.
+
+Để chạy lại toàn bộ thực nghiệm, cần chuẩn bị dữ liệu,
+môi trường và checkpoint phù hợp.
+
+Một số thí nghiệm bổ sung có thể chưa được đóng gói
+thành script chạy độc lập.
 
 ## 13. Ghi chú
 
