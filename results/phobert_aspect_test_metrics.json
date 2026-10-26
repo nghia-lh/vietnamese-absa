@@ -1,0 +1,24 @@
+{
+  "task": "aspect_extraction",
+  "model": "PhoBERT",
+  "split": "test",
+  "test_reviews": 2076,
+  "gold_source": "data/processed_v2/test.jsonl",
+  "prediction_source": "outputs/evaluation/aspect_kaggle/test_predictions.jsonl",
+  "exact_span": {
+    "tp": 3823,
+    "fp": 4033,
+    "fn": 2669,
+    "precision": 0.4866344195519348,
+    "recall": 0.5888786198398028,
+    "f1": 0.5328965709506552
+  },
+  "full_match": {
+    "tp": 3396,
+    "fp": 4460,
+    "fn": 3096,
+    "precision": 0.43228105906313646,
+    "recall": 0.5231053604436229,
+    "f1": 0.47337608028993583
+  }
+}

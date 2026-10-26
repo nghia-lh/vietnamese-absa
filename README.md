@@ -368,6 +368,27 @@ Kết quả được lưu tại:
 ```text
 outputs/ablation_baseline/metrics.json
 ```
+### 7.4. Kết quả thực nghiệm đã lưu
+
+Thư mục `results/` chứa các file metrics từ những thí nghiệm được báo cáo trong paper. Các file này giúp kiểm tra kết quả mà không cần huấn luyện lại mô hình.
+
+| Nội dung trong paper | File kết quả |
+|---|---|
+| Table 2 – TF-IDF Baseline (Dev) | `results/baseline_visfd_metrics.json` |
+| Table 3 – Overall Sentiment (Test) | `results/baseline_visfd_metrics.json`, `results/phobert_overall_test_metrics.json` |
+| Table 4 – Per-class Overall F1 | `results/baseline_visfd_metrics.json`, `results/phobert_overall_test_metrics.json` |
+| Table 5 – Aspect Extraction | `results/aspect_nb_baseline_metrics.json`, `results/phobert_aspect_test_metrics.json` |
+| Table 7 – Baseline Ablation | `results/baseline_ablation_metrics.json` |
+| External Tiki Evaluation | `results/external_tiki_metrics.json` |
+
+Thông tin cấu hình huấn luyện và kết quả token-level được lưu trong:
+
+- `results/phobert_overall_training_metrics.json`
+- `results/phobert_aspect_training_metrics.json`
+
+Riêng Table 6 (inference latency) được mô tả trong mục 10.3. Chưa có file benchmark tương ứng trong `results/`.
+
+Kết quả PhoBERT Aspect được tính từ `data/processed_v2/test.jsonl` và `outputs/evaluation/aspect_kaggle/test_predictions.jsonl`, sử dụng exact character-span matching và full span–category–polarity matching. Các file dữ liệu và dự đoán gốc không được đóng gói trong `results/`.
 
 ## 8. Phân tích lỗi
 
@@ -580,20 +601,48 @@ Nếu có thêm thời gian, nhóm có thể thử cải thiện việc chuẩn 
 
 Các hướng trên mới là đề xuất, nhóm chưa thực hiện thí nghiệm để kiểm chứng hiệu quả.
 
-## 12. Những phần cần hoàn thiện trước khi nộp
+## 12. Ghi chú về khả năng tái lập
 
-- [x] Chuẩn bị dữ liệu và chia Train/Dev/Test.
-- [x] Huấn luyện và đánh giá baseline.
-- [x] Huấn luyện và đánh giá PhoBERT Overall.
-- [x] Huấn luyện và đánh giá PhoBERT Aspect.
-- [x] Phân tích lỗi và lưu kết quả.
-- [x] Kiểm tra dữ liệu trùng và thứ tự predictions.
-- [x] Cập nhật `requirements.txt` và kiểm tra dependencies trên máy hiện tại.
-- [x] Xây dựng và chạy thử backend FastAPI.
-- [ ] Kiểm tra toàn bộ test tự động của source.
-- [ ] Bổ sung các script chạy lại đánh giá Tiki, ablation và benchmark nếu chưa có trong repository.
-- [ ] Hoàn thiện và kiểm thử tích hợp giao diện React.
-- [ ] Hoàn thiện báo cáo và chuẩn bị demo.
+Repository cung cấp mã nguồn cho quy trình tiền xử lý dữ liệu, huấn luyện, đánh giá và suy luận của hai tác vụ: phân loại cảm xúc tổng thể (Overall Sentiment Classification) và trích xuất ý kiến theo khía cạnh (Aspect-Level Opinion Extraction).
+
+Các thí nghiệm sử dụng hai bộ dữ liệu UIT-ViSD4SA và UIT-ViSFD. Dữ liệu gốc không được đóng gói trực tiếp trong repository; hướng dẫn chuẩn bị dữ liệu được trình bày ở Mục 5.
+
+Các file kết quả thực nghiệm đã lưu được cung cấp trong thư mục `results/` và được đối chiếu với các bảng kết quả trong bài báo tại Mục 7.4.
+
+### Tải checkpoint PhoBERT
+
+Hai checkpoint PhoBERT đã fine-tune được cung cấp qua Google Drive do dung lượng lớn, không lưu trực tiếp trong GitHub.
+
+**Link tải:** [PhoBERT Checkpoints – Google Drive](https://drive.google.com/file/d/1JWf3KrzuXr6NE5aZMxxEF6hapkTre_9r/view?usp=drive_link)
+
+File `phobert_checkpoints.zip` chứa hai mô hình:
+
+- **PhoBERT Overall:** Phân loại cảm xúc tổng thể (Negative, Neutral, Positive).
+- **PhoBERT Aspect:** Trích xuất opinion spans, aspect categories và sentiment polarities.
+
+Sau khi tải, đặt file ZIP vào thư mục gốc của project và giải nén:
+
+```bash
+unzip phobert_checkpoints.zip
+```
+
+Sau khi giải nén, hai checkpoint nằm tại:
+
+```text
+models/phobert/
+├── overall/
+│   └── best/
+│       ├── config.json
+│       ├── model.safetensors
+│       └── ...
+└── aspect/
+    └── best/
+        ├── config.json
+        ├── model.safetensors
+        └── ...
+```
+
+Việc tái lập toàn bộ quá trình huấn luyện yêu cầu dữ liệu đã tiền xử lý, các thư viện phụ thuộc và môi trường tính toán phù hợp. Kết quả thực nghiệm có thể chịu ảnh hưởng bởi phiên bản thư viện và phần cứng sử dụng.
 
 ## 13. Ghi chú
 
