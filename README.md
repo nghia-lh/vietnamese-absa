@@ -11,11 +11,16 @@ Ngoài phần huấn luyện và đánh giá mô hình, nhóm còn xây dựng A
 
 ## 1. Dữ liệu sử dụng
 
-Nhóm sử dụng hai bộ dữ liệu tiếng Việt:
+Nhóm sử dụng hai bộ dữ liệu tiếng Việt. Dataset gốc được cung cấp bởi nhóm tác giả tương ứng:
+
+- **[UIT-ViSD4SA](https://github.com/kimkim00/UIT-ViSD4SA):** cung cấp nội dung review, vị trí các opinion spans, aspect category, polarity và các split dữ liệu cho bài toán Aspect.
+- **[UIT-ViSFD](https://github.com/LuongPhan/UIT-ViSFD):** cung cấp thông tin số sao (`n_star`) để nhóm đối chiếu và tạo nhãn Overall. Tệp dữ liệu gốc có thể tải từ `UIT-ViSFD.zip` trong repository này.
+
+**Lưu ý:** Nhóm không sử dụng toàn bộ UIT-ViSFD như một tập dữ liệu Overall độc lập. Nhóm dùng các review từ UIT-ViSD4SA, đối chiếu nội dung đã chuẩn hóa với rating của UIT-ViSFD, loại bản ghi không khớp hoặc mâu thuẫn và giữ cách chia Train/Dev/Test gốc.
 
 | Bài toán | Bộ dữ liệu | Train | Dev | Test |
 |---|---|---:|---:|---:|
-| Overall Sentiment | UIT-ViSFD | 7.057 | 1.004 | 2.022 |
+| Overall Sentiment | UIT-ViSD4SA (review) + UIT-ViSFD (rating) | 7.057 | 1.004 | 2.022 |
 | Aspect-Based Sentiment | UIT-ViSD4SA | 7.360 | 1.037 | 2.076 |
 
 ### 1.1. Overall Sentiment
@@ -195,6 +200,30 @@ VnCoreNLP cần có Java để chạy. Ngoài ra, phiên bản thư viện giữ
 
 Nếu đã có các thư mục `data/overall_visfd` và `data/processed_v2` thì có thể dùng trực tiếp, không cần tiền xử lý lại.
 
+### 5.1. Tải dữ liệu gốc
+
+Dữ liệu gốc và checkpoint fine-tuned **không được đính kèm trong source code repository**. Để chuẩn bị dữ liệu từ đầu:
+
+1. Tải ba file `train.jsonl`, `dev.jsonl`, `test.jsonl` trong thư mục [`data/` của UIT-ViSD4SA](https://github.com/kimkim00/UIT-ViSD4SA/tree/main/data), đặt dưới thư mục `data/visd4sa/` của project.
+2. Tải [`UIT-ViSFD.zip`](https://github.com/LuongPhan/UIT-ViSFD/blob/main/UIT-ViSFD.zip), giải nén dữ liệu rating vào `data/visfd_raw/`. Kiểm tra rằng các tệp CSV/split có tên và định dạng mà `src/prepare_overall_visfd.py` yêu cầu, đặc biệt các cột review (`comment`) và số sao (`n_star`).
+3. Cài đặt VnCoreNLP theo mục 4 và xác nhận các file model đã nằm trong `models/vncorenlp/`.
+
+Cấu trúc thư mục dữ liệu đầu vào dự kiến:
+
+```text
+data/
+├── visd4sa/
+│   ├── train.jsonl
+│   ├── dev.jsonl
+│   └── test.jsonl
+└── visfd_raw/
+    └── ...                 # Các CSV sau khi giải nén UIT-ViSFD.zip
+```
+
+Có thể tham khảo `src/download_data.py` nếu muốn sử dụng script tải dữ liệu đi kèm project; cần kiểm tra tham số của script trước khi chạy.
+
+### 5.2. Chạy preprocessing
+
 Nếu muốn tạo lại dữ liệu từ nguồn gốc, chạy:
 
 ```bash
@@ -209,6 +238,10 @@ python3 -m src.prepare_overall_visfd
 ```
 
 Script `prepare_overall_visfd.py` sử dụng dữ liệu rating từ `data/visfd_raw` và review tương ứng từ `data/visd4sa`.
+
+Trong preprocessing Overall, nhãn được tạo theo quy tắc 1–2 sao → `negative`, 3 sao → `neutral`, 4–5 sao → `positive`. Các review không thể đối chiếu chắc chắn hoặc có rating không nhất quán bị loại; những nhãn này là **weak labels**. Với Aspect, cần giữ đúng ranh giới ký tự của gold spans và không ép căn chỉnh các trường hợp không hợp lệ.
+
+Sau khi chạy, hãy xem `preprocessing_report.json` ở mỗi thư mục đầu ra và kiểm tra số lượng mẫu. Nếu không khớp số liệu trong paper, cần kiểm tra phiên bản dataset, tham số của script và số bản ghi bị loại, không tự điều chỉnh số lượng mẫu.
 
 Sau khi tiền xử lý, nhóm đã kiểm tra số lượng mẫu, dữ liệu trùng trong từng split và giữa các split.
 
@@ -291,6 +324,26 @@ models/phobert/aspect/best/
 Lưu ý: checkpoint Aspect hiện tại là kết quả của lần huấn luyện lại. Nhóm sử dụng metrics tương ứng với checkpoint này khi báo cáo, không trộn với kết quả từ lần train cũ.
 
 Tham số `--fp16` được sử dụng khi huấn luyện trên GPU CUDA. Khi chạy trên CPU hoặc máy không hỗ trợ CUDA cần điều chỉnh tham số này.
+
+### 6.4. Trạng thái checkpoint và cách sử dụng
+
+### 6.4. Trạng thái checkpoint và cách sử dụng
+
+Hai mô hình sử dụng backbone gốc [`vinai/phobert-base-v2`](https://huggingface.co/vinai/phobert-base-v2), nhưng **checkpoint đã fine-tune cho Overall và Aspect là hai bộ trọng số riêng**, không thể thay bằng checkpoint PhoBERT gốc nếu muốn tái tạo kết quả trong paper.
+
+Vị trí checkpoint để đánh giá và chạy inference:
+
+```text
+models/phobert/
+├── overall/best/     # Checkpoint PhoBERT Overall đã fine-tune
+└── aspect/best/      # Checkpoint PhoBERT Aspect đã fine-tune
+```
+
+**Trạng thái phát hành:** Repository cung cấp mã nguồn huấn luyện và đánh giá. Hai checkpoint PhoBERT đã fine-tune được chia sẻ qua [Google Drive](https://drive.google.com/file/d/1JWf3KrzuXr6NE5aZMxxEF6hapkTre_9r/view?usp=drive_link) do dung lượng lớn, không được lưu trực tiếp trên GitHub.
+
+Hướng dẫn tải và giải nén checkpoint được trình bày tại **Mục 12 – Ghi chú về khả năng tái lập**.
+
+Để chạy đánh giá hoặc inference, cần bảo đảm mỗi thư mục `best/` chứa đầy đủ trọng số mô hình, cấu hình và các file tokenizer tương ứng.
 
 ## 7. Đánh giá mô hình
 
@@ -579,8 +632,6 @@ Benchmark chưa bao gồm thời gian render frontend, độ trễ Internet ho�
 
 ### 10.4. Frontend
 
-Giao diện React do thành viên khác trong nhóm phụ trách.
-
 Backend đã có API phục vụ các chức năng phân tích review, lưu dữ liệu và thống kê. Phần tích hợp frontend và kiểm thử giao diện sẽ được cập nhật sau khi hoàn thành.
 
 Dữ liệu review của ứng dụng đang được lưu dưới dạng JSON trong `dashboard_data`, chưa sử dụng cơ sở dữ liệu riêng.
@@ -607,7 +658,7 @@ Repository cung cấp mã nguồn cho quy trình tiền xử lý dữ liệu, hu
 
 Các thí nghiệm sử dụng hai bộ dữ liệu UIT-ViSD4SA và UIT-ViSFD. Dữ liệu gốc không được đóng gói trực tiếp trong repository; hướng dẫn chuẩn bị dữ liệu được trình bày ở Mục 5.
 
-Các file kết quả thực nghiệm đã lưu được cung cấp trong thư mục `results/` và được đối chiếu với các bảng kết quả trong bài báo tại Mục 7.4.
+Các file kết quả thực nghiệm được cung cấp trong thư mục `results/` và được đối chiếu với các bảng kết quả trong paper tại Mục 7.4.
 
 ### Tải checkpoint PhoBERT
 
@@ -649,3 +700,5 @@ Việc tái lập toàn bộ quá trình huấn luyện yêu cầu dữ liệu �
 Các kết quả trong README được lấy từ những lần thực nghiệm đã thực hiện. Nhóm sử dụng kết quả của checkpoint hiện tại khi báo cáo, đặc biệt là mô hình PhoBERT Aspect đã huấn luyện lại.
 
 Project đã chạy trên môi trường phát triển hiện tại, nhưng chưa kiểm tra lại toàn bộ quy trình từ đầu trên một máy sạch. Nếu muốn tái lập hoàn toàn, cần chuẩn bị đúng dữ liệu nguồn, checkpoint, phiên bản thư viện và môi trường huấn luyện tương ứng.
+
+**Code availability và reproducibility:** Repository công khai source code để kiểm tra cách chuẩn bị dữ liệu, huấn luyện, đánh giá và suy luận. Tuy nhiên, việc clone repository **chưa đủ để tái tạo tức thì các kết quả trong paper**, vì dataset gốc, checkpoint fine-tuned và một số tài nguyên/thí nghiệm phụ cần được chuẩn bị riêng. Khi sử dụng hai dataset, vui lòng trích dẫn các công trình nghiên cứu gốc được dẫn trong các repository tương ứng.
